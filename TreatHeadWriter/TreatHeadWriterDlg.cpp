@@ -20,6 +20,7 @@
 #endif
 
 
+
 // 用于应用程序“关于”菜单项的 CAboutDlg 对话框
 
 class CAboutDlg : public CDialogEx
@@ -63,6 +64,7 @@ HANDLE ReadThread;
 DWORD ReadThreadId;
 HANDLE WriteThread;
 DWORD WriteThreadId;
+CArray<CString, CString&> DeviceListPatchArray;
 
 
 CTreatHeadWriterDlg::CTreatHeadWriterDlg(CWnd* pParent /*=NULL*/)
@@ -76,6 +78,8 @@ void CTreatHeadWriterDlg::DoDataExchange(CDataExchange* pDX)
 	CDialogEx::DoDataExchange(pDX);
 	DDX_Control(pDX, IDC_DEVICELIST, m_cDeviceList);
 	DDX_Control(pDX, IDC_BUTTON1, m_connButton);
+	DDX_Control(pDX, IDC_CONN_STAT, m_conn_stat);
+	DDX_Control(pDX, IDC_INPUTDEBUG, m_InputDebug);
 }
 
 BEGIN_MESSAGE_MAP(CTreatHeadWriterDlg, CDialogEx)
@@ -85,6 +89,7 @@ BEGIN_MESSAGE_MAP(CTreatHeadWriterDlg, CDialogEx)
 	ON_COMMAND(ID_ABOUT, &CTreatHeadWriterDlg::OnAbout)
 	ON_CBN_DROPDOWN(IDC_DEVICELIST, &CTreatHeadWriterDlg::OnCbnDropdownDevicelist)
 	ON_WM_DEVICECHANGE()
+	ON_BN_CLICKED(IDC_BUTTON1, &CTreatHeadWriterDlg::OnBnClickedButton1)
 END_MESSAGE_MAP()
 
 
@@ -124,13 +129,15 @@ BOOL CTreatHeadWriterDlg::OnInitDialog()
 	CMenu menu;
 	menu.LoadMenu(IDR_MENU1);  //IDR_MENU1为菜单栏ID号  
 	SetMenu(&menu);
-
+	
 	DEV_BROADCAST_DEVICEINTERFACE filter = { 0 };
 	filter.dbcc_size = sizeof(filter);
 	filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
 	HidD_GetHidGuid(&Guid);
 	filter.dbcc_classguid = Guid;
 	RegisterDeviceNotification(GetSafeHwnd(), (PVOID)&filter, DEVICE_NOTIFY_WINDOW_HANDLE);
+
+	DeviceConnected = 0;
 
 	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
 }
@@ -140,11 +147,19 @@ BOOL CTreatHeadWriterDlg::OnDeviceChange(UINT nEventType, DWORD dwData)
 	switch (nEventType)
 	{
 	case DBT_DEVICEREMOVECOMPLETE://(nEventType == 0x0007))
-	case DBT_DEVICEARRIVAL:
-		hdr = (_DEV_BROADCAST_HEADER*)dwData;
-		if (hdr->dbcd_devicetype == DBT_DEVTYP_DEVICEINTERFACE)
+		if (DeviceConnected == 1)
 		{
-			RefreshDevices();
+			CloseHandle(hDeviceHandle);
+		}
+
+	case DBT_DEVICEARRIVAL:
+		if (DeviceConnected == 0)
+		{
+			hdr = (_DEV_BROADCAST_HEADER*)dwData;
+			if (hdr->dbcd_devicetype == DBT_DEVTYP_DEVICEINTERFACE)
+			{
+				RefreshDevices();
+			}
 		}
 		break;
 	default:
@@ -156,15 +171,17 @@ void CTreatHeadWriterDlg::RefreshDevices()
 {
 	WCHAR	Product[253];
 	CHAR Prod[253];
-	CString	 String;
+	CString	 patch;
+	
 
 	m_cDeviceList.ResetContent();
 	m_connButton.SetWindowTextA("连接");
+	m_conn_stat.SetWindowTextA("已断开");
 	HDEVINFO info;
 	info = SetupDiGetClassDevs(&Guid, NULL, NULL, DIGCF_PRESENT | DIGCF_INTERFACEDEVICE);
 	if (info != INVALID_HANDLE_VALUE)
 	{
-		HANDLE        hDeviceHandle;
+		
 		DWORD devIndex;
 		SP_INTERFACE_DEVICE_DATA ifData;
 		ifData.cbSize = sizeof(ifData);
@@ -184,6 +201,7 @@ void CTreatHeadWriterDlg::RefreshDevices()
 				// Add the link to the list of all HID devices
 				if (strstr(detail->DevicePath, "vid_0483&pid_5751") != NULL)
 				{
+					patch = detail->DevicePath;
 					hDeviceHandle = CreateFile(detail->DevicePath,
 						GENERIC_READ | GENERIC_WRITE,
 						FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -197,13 +215,13 @@ void CTreatHeadWriterDlg::RefreshDevices()
 					size_t t;
 					wcstombs_s(&t,Prod,253, Product, 256);
 					m_cDeviceList.AddString(Prod);
+					DeviceListPatchArray.Add(patch);
+
 					CloseHandle(hDeviceHandle);
 				}
 			}
 			else
 				m_cDeviceList.AddString("");
-
-
 			delete[](PBYTE)detail;
 		}
 		SetupDiDestroyDeviceInfoList(info);
@@ -211,7 +229,19 @@ void CTreatHeadWriterDlg::RefreshDevices()
 	m_cDeviceList.SetCurSel(0);
 	if (m_cDeviceList.GetCount() == 1)
 	{
+		hDeviceHandle = CreateFile(patch,
+			GENERIC_READ | GENERIC_WRITE,
+			FILE_SHARE_READ | FILE_SHARE_WRITE,
+			NULL,
+			OPEN_EXISTING,
+			0,
+			NULL);
+		if (hDeviceHandle == INVALID_HANDLE_VALUE)
+			return;
+		m_conn_stat.SetWindowTextA("已连接");
 		m_connButton.SetWindowTextA("断开");
+		GetDlgItem(IDC_DEVICELIST)->EnableWindow(false);
+		DeviceConnected = 1;
 	}
 }
 void CTreatHeadWriterDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -301,4 +331,39 @@ void CTreatHeadWriterDlg::OnCbnDropdownDevicelist()
 	//	}
 	//}
 	//
+}
+
+
+void CTreatHeadWriterDlg::OnBnClickedButton1()
+{
+	if (DeviceConnected == 1)
+	{
+		if (hDeviceHandle != INVALID_HANDLE_VALUE)
+			CloseHandle(hDeviceHandle);
+		m_conn_stat.SetWindowTextA("已断开");
+		m_connButton.SetWindowTextA("连接");
+		GetDlgItem(IDC_DEVICELIST)->EnableWindow(true);
+		DeviceConnected = 0;
+	}
+	else
+	{
+		if (m_cDeviceList.GetCount() > 0 )
+		{
+			CString str = DeviceListPatchArray.GetAt(m_cDeviceList.GetCurSel());
+				hDeviceHandle = CreateFile(str,
+				GENERIC_READ | GENERIC_WRITE,
+				FILE_SHARE_READ | FILE_SHARE_WRITE,
+				NULL,
+				OPEN_EXISTING,
+				0,
+				NULL);
+			if (hDeviceHandle == INVALID_HANDLE_VALUE)
+				return;
+			m_conn_stat.SetWindowTextA("已连接");
+			m_connButton.SetWindowTextA("断开");
+			GetDlgItem(IDC_DEVICELIST)->EnableWindow(false);
+			DeviceConnected = 1;
+
+		}
+	}
 }

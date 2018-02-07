@@ -23,6 +23,8 @@ public:
 // 实现
 protected:
 	HICON m_hIcon;
+	HANDLE        hDeviceHandle;
+	BOOL DeviceConnected;
 	BOOL OnDeviceChange(UINT nEventType, DWORD dwData);
 	void RefreshDevices(void);
 	// 生成的消息映射函数
@@ -36,4 +38,7 @@ public:
 	afx_msg void OnCbnDropdownDevicelist();
 	CComboBox m_cDeviceList;
 	CButton m_connButton;
+	afx_msg void OnBnClickedButton1();
+	CStatic m_conn_stat;
+	CEdit m_InputDebug;
 };
