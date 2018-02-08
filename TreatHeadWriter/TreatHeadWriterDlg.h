@@ -13,6 +13,8 @@ class CTreatHeadWriterDlg : public CDialogEx
 public:
 	CTreatHeadWriterDlg(CWnd* pParent = NULL);	// 标准构造函数
 
+	static DWORD WINAPI ReadReport(void*);
+
 // 对话框数据
 	enum { IDD = IDD_TREATHEADWRITER_DIALOG };
 
@@ -20,10 +22,11 @@ public:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV 支持
 
 
+
 // 实现
 protected:
 	HICON m_hIcon;
-	HANDLE        hDeviceHandle;
+	
 	BOOL DeviceConnected;
 	BOOL OnDeviceChange(UINT nEventType, DWORD dwData);
 	void RefreshDevices(void);

@@ -6,12 +6,15 @@
 #include "TreatHeadWriter.h"
 #include "TreatHeadWriterDlg.h"
 #include "afxdialogex.h"
+#include <stdlib.h>
+#include <windows.h>
 
-#include "INC\hidsdi++.h"
-#include "INC\hid.h"
+//#include "INC\hidsdi++.h"
+//#include "INC\hid.h"
 #include <setupapi.h>
-#include "INC\usb100.h"
+//#include "INC\usb100.h"
 #include <hidsdi.h>
+//#include <hid.h>
 
 #include <dbt.h>
 
@@ -19,8 +22,10 @@
 #define new DEBUG_NEW
 #endif
 
-
-
+BYTE InputReport[256];
+BYTE OutputReport[256];
+BOOL WRITE_ROPRT;
+HANDLE        hDeviceHandle;
 // 用于应用程序“关于”菜单项的 CAboutDlg 对话框
 
 class CAboutDlg : public CDialogEx
@@ -137,6 +142,16 @@ BOOL CTreatHeadWriterDlg::OnInitDialog()
 	filter.dbcc_classguid = Guid;
 	RegisterDeviceNotification(GetSafeHwnd(), (PVOID)&filter, DEVICE_NOTIFY_WINDOW_HANDLE);
 
+	//if (ReadThread == NULL)
+	//{
+	//	ReadThread = CreateThread(NULL,
+	//		0,
+	//		ReadReport,
+	//		m_hWnd,
+	//		0,
+	//		&ReadThreadId);
+	//}
+
 	DeviceConnected = 0;
 
 	return TRUE;  // 除非将焦点设置到控件，否则返回 TRUE
@@ -172,7 +187,7 @@ void CTreatHeadWriterDlg::RefreshDevices()
 	WCHAR	Product[253];
 	CHAR Prod[253];
 	CString	 patch;
-	
+	DWORD k;
 
 	m_cDeviceList.ResetContent();
 	m_connButton.SetWindowTextA("连接");
@@ -195,9 +210,11 @@ void CTreatHeadWriterDlg::RefreshDevices()
 			PSP_INTERFACE_DEVICE_DETAIL_DATA detail = (PSP_INTERFACE_DEVICE_DETAIL_DATA)new BYTE[needed];
 			detail->cbSize = sizeof(SP_INTERFACE_DEVICE_DETAIL_DATA);
 			SP_DEVINFO_DATA did = { sizeof(SP_DEVINFO_DATA) };
-
+			//SetupDiGetDeviceInterfaceDetail(info, &ifData, detail, needed, NULL, &did);
+			//if (SetupDiGetDeviceRegistryProperty(info, &did, SPDRP_DEVICEDESC, NULL, (PBYTE)Product, 253, NULL))
 			if (SetupDiGetDeviceInterfaceDetail(info, &ifData, detail, needed, NULL, &did))
 			{
+
 				// Add the link to the list of all HID devices
 				if (strstr(detail->DevicePath, "vid_0483&pid_5751") != NULL)
 				{
@@ -234,14 +251,39 @@ void CTreatHeadWriterDlg::RefreshDevices()
 			FILE_SHARE_READ | FILE_SHARE_WRITE,
 			NULL,
 			OPEN_EXISTING,
-			0,
+			0,//FILE_FLAG_OVERLAPPED,
 			NULL);
 		if (hDeviceHandle == INVALID_HANDLE_VALUE)
 			return;
+		PHIDD_ATTRIBUTES Attributes = (PHIDD_ATTRIBUTES)malloc(sizeof(HIDD_ATTRIBUTES));
+		if (!HidD_GetAttributes(hDeviceHandle, Attributes))
+		{
+			CloseHandle(hDeviceHandle);
+			//SetupDiDestroyDeviceInfoList(hDevInfo);
+			return;
+		}
 		m_conn_stat.SetWindowTextA("已连接");
 		m_connButton.SetWindowTextA("断开");
 		GetDlgItem(IDC_DEVICELIST)->EnableWindow(false);
 		DeviceConnected = 1;
+		BOOL Result = ReadFile
+			(hDeviceHandle,
+			&InputReport,
+			65,
+			&NumberOfBytesRead,
+			(LPOVERLAPPED)&HIDOverlapped);
+		if (Result == TRUE && NumberOfBytesRead>0)
+		{
+			CString t, s;
+			t.Format("0x%08X", *(DWORD*)InputReport);
+			m_InputDebug.GetWindowTextA(s);
+			s += t;
+			m_InputDebug.SetWindowTextA(s);
+		}
+		else
+		{
+			k = GetLastError();
+		}
 	}
 }
 void CTreatHeadWriterDlg::OnSysCommand(UINT nID, LPARAM lParam)
@@ -332,7 +374,37 @@ void CTreatHeadWriterDlg::OnCbnDropdownDevicelist()
 	//}
 	//
 }
+DWORD WINAPI CTreatHeadWriterDlg::ReadReport(void* pData)
+{
+	CTreatHeadWriterDlg pDialog = static_cast< CTreatHeadWriterDlg* >(
+		CWnd::FromHandle(reinterpret_cast< HWND >(pData)));
+	//ASSERT_VALID(pDialog);
+	while (TRUE)
+	{
+		if (!WRITE_ROPRT)
+		{
+			if (hDeviceHandle != INVALID_HANDLE_VALUE)
+			{
+				CString s,t;
+				CancelIo(hDeviceHandle);
+				//InputReport[0]=0;
+				BOOL Result = HidD_GetInputReport
+					(hDeviceHandle,
+					&InputReport,
+					64);
+				if (Result == TRUE && NumberOfBytesRead>0)
+				{
+					t.Format("0x%08X", InputReport);
+					//pDialog.m_InputDebug.GetWindowTextA(s);
+					s += t;
+				    //pDialog.m_InputDebug.SetWindowTextA(s);
+				}
+			}
+		}
+		Sleep(25);
+	}
 
+}
 
 void CTreatHeadWriterDlg::OnBnClickedButton1()
 {
